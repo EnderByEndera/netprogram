@@ -30,18 +30,15 @@ int main(int argc, char **argv)
     bzero(&(sockaddress.sin_zero), 8);
     while (connect(sockfd, (struct sockaddr *)&sockaddress, sizeof(struct sockaddr)) == -1)
         ;
-    printf("Get the server\n");
 
     while (1)
     {
-        printf("Enter something: \n");
-        scanf("%s", buf);
-        printf("Enter finished, ready to send the message\n");
+        scanf("%[^\n]%*c", buf);
+        if (buf[0] == 'E' && buf[1] == 'O' && buf[2] == 'F') break;
         numbers = send(sockfd, buf, strlen(buf), 0);
-        printf("Already Sent the message\n");
         numbers = recv(sockfd, buf, BUFSIZ, 0);
         buf[numbers] = '\0';
-        printf("received: %s\n", buf);
+        printf("%s\n", buf);
     }
     close(sockfd);
     return 0;
