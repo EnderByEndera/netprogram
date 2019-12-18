@@ -51,6 +51,9 @@ void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockadd
 void *heart_check(void *arg);
 int client_server_structure(int argv, char **argc);
 int self_organize(int argv, char **argc);
+int heart_beep_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address, int socket_file_descriptor);
+int eof_filter(char *buf, msgNode *msgHead, addrNode *addrHead, int socket_file_descriptor, struct sockaddr_in client_address);
+int exit_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address);
 
 // Building a Chat Room Server based on UDP connection
 int main(int argv, char **argc)
@@ -98,6 +101,8 @@ int client_server_structure(int argv, char **argc)
 
     msgHead->next = NULL;
     addrHead->next = NULL;
+    msgHead->data.number = 0;
+    addrHead->data.number = 0;
 
     while ((socket_file_descriptor = socket(PF_INET, SOCK_DGRAM, 0)) == -1)
         ;
@@ -140,76 +145,17 @@ int client_server_structure(int argv, char **argc)
         }
         buf[n] = '\0';
 
-        // Heart Beat Check Function
-        if (strcmp(buf, "This is the Heart Beep") == 0)
-        {
-            addrNode *ptr = addrHead;
-            while (ptr->next != NULL)
-            {
-                ptr = ptr->next;
-                if (ptr->data.client_address.sin_addr.s_addr == client_address.sin_addr.s_addr && ptr->data.client_address.sin_port == client_address.sin_port)
-                {
-                    ptr->data.ttl = 20;
-                    break;
-                }
-            }
-            n = sendto(socket_file_descriptor, buf, strlen(buf), 0, (struct sockaddr *)&client_address, client_address_length);
-            if (n == -1)
-            {
-                perror("sendto error");
-            }
+        int result = heart_beep_filter(buf, addrHead, client_address, socket_file_descriptor);
+        if (result == 1)
             continue;
-        }
 
-        // EOF End Server Function
-        if (strcmp(buf, "EOF\n") == 0)
-        {
-            printf("WARNING: EOF message received, ready to stop server\n");
-            msgNode *msgptr = msgHead;
-            addrNode *addrptr = addrHead;
-
-            while (msgHead->next != NULL)
-            {
-                msgptr = msgptr->next;
-                free(msgHead->data.msg);
-                free(msgHead);
-                msgHead = msgptr;
-            }
-            free(msgHead->data.msg);
-            free(msgHead);
-            char temp[BUFSIZ] = "Server shutdown\n";
-            broadcast(addrHead, temp, socket_file_descriptor, BUFSIZ, client_address);
-            while (addrHead->next != NULL)
-            {
-                addrptr = addrptr->next;
-                free(addrHead);
-                addrHead = addrptr;
-            }
-            free(msgHead->data.msg);
-            free(msgHead);
-            n = sendto(socket_file_descriptor, temp, strlen(temp), 0, (struct sockaddr *)&client_address, client_address_length);
-            if (n == -1)
-            {
-                perror("sendto error");
-            }
-            close(socket_file_descriptor);
+        result = eof_filter(buf, msgHead, addrHead, socket_file_descriptor, client_address);
+        if (result == 1)
             break;
-        }
 
-        if (strcmp(buf, "exit\n") == 0)
-        {
-            addrNode *ptr = addrHead;
-            while (ptr->next != NULL)
-            {
-                ptr = ptr->next;
-                if (ptr->data.client_address.sin_addr.s_addr == client_address.sin_addr.s_addr && ptr->data.client_address.sin_port == client_address.sin_port)
-                {
-                    ptr->data.ttl = -100;
-                    break;
-                }
-            }
+        result = exit_filter(buf, addrHead, client_address);
+        if (result == 1)
             continue;
-        }
 
         printf("INFO: Received from IP: %s, PORT: %d\n", inet_ntop(AF_INET, &client_address.sin_addr, str, sizeof(str)), ntohs(client_address.sin_port));
         printf("INFO: Receive Message: %s", buf);
@@ -249,6 +195,93 @@ int client_server_structure(int argv, char **argc)
 
 int self_organize(int argv, char **argc)
 {
+    printf("INFO: Start Self Organization mode\n");
+    int size = 220 * 1024; // used for setsocketopt() func to set buffer size
+    struct sockaddr_in server_address, client_address;
+    int socket_file_descriptor; // used for UDP connection
+    socklen_t client_address_length;
+    int sockfd;
+    char buf[BUFSIZ];
+    char str[INET_ADDRSTRLEN];
+    int i, n;
+    pthread_t thid_heart_check, thid_heart_listen;
+
+    msgNode *msgHead = (msgNode *)malloc(sizeof(msgNode));
+    addrNode *addrHead = (addrNode *)malloc(sizeof(addrNode));
+
+    msgHead->next = NULL;
+    addrHead->next = NULL;
+
+    while ((socket_file_descriptor = socket(PF_INET, SOCK_DGRAM, 0)) == -1)
+        ;
+
+    bzero(&server_address, sizeof(server_address));
+    server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_address.sin_family = AF_INET;
+    server_address.sin_port = htons(atoi(argc[1]));
+
+    bind(socket_file_descriptor, (struct sockaddr *)&server_address, sizeof(server_address));
+    setsockopt(socket_file_descriptor, SOL_SOCKET, SO_ATTACH_BPF, &size, sizeof(size));
+
+    struct RA *thread_attr = (struct RA *)malloc(sizeof(struct RA));
+    thread_attr->addrHead = addrHead;
+    thread_attr->msgHead = msgHead;
+    thread_attr->fd = socket_file_descriptor;
+    thread_attr->buf = buf;
+    int err = pthread_create(&thid_heart_check, NULL, heart_check, (void *)thread_attr);
+    if (err != 0)
+    {
+        perror("pthread_create failure");
+        exit(1);
+    }
+    err = pthread_detach(thid_heart_check);
+    if (err != 0)
+    {
+        perror("pthread_detach failure");
+        exit(1);
+    }
+
+    printf("INFO: Bind success, accepting UDP connections...\n");
+
+    while (1)
+    {
+        client_address_length = sizeof(client_address);
+        n = recvfrom(socket_file_descriptor, buf, BUFSIZ, 0, (struct sockaddr *)&client_address, &client_address_length);
+        if (n == -1)
+        {
+            perror("recvfrom error");
+        }
+        buf[n] = '\0';
+
+        int result = heart_beep_filter(buf, addrHead, client_address, socket_file_descriptor);
+        if (result == 1)
+            continue;
+
+        result = eof_filter(buf, msgHead, addrHead, socket_file_descriptor, client_address);
+        if (result == 1)
+            break;
+
+        result = exit_filter(buf, addrHead, client_address);
+        if (result == 1)
+            continue;
+
+        printf("INFO: Receive Messge: %s", buf);
+
+        i = addAddrNode(addrHead, client_address, buf);
+        if (i == 0)
+        {
+            printf("INFO: New IP address added, IP: %s, PORT: %d\n", inet_ntop(AF_INET, &client_address.sin_addr, str, sizeof(str)), ntohs(client_address.sin_port));
+            addrNode *addrptr = addrHead;
+            while (addrptr->next != NULL)
+            {
+                addrptr = addrptr->next;
+                inet_ntop(AF_INET, &(addrptr->data.client_address.sin_addr), str, strlen(str));
+                snprintf(buf, BUFSIZ, "^: address: %s, port: %d\n", str, ntohs(addrptr->data.client_address.sin_port));
+                broadcast(addrHead, buf, socket_file_descriptor, strlen(buf), client_address);
+            }
+        }
+    }
+
     return 0;
 }
 
@@ -375,4 +408,89 @@ void *heart_check(void *arg)
         deleteAddrNode(tmpRA->addrHead, tmpRA->msgHead, tmpRA->fd);
         sleep(1);
     }
+}
+
+int heart_beep_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address, int socket_file_descriptor)
+{
+    // Heart Beat Check Function
+    socklen_t client_address_length = sizeof(client_address);
+    if (strcmp(buf, "This is the Heart Beep") == 0)
+    {
+        addrNode *ptr = addrHead;
+        while (ptr->next != NULL)
+        {
+            ptr = ptr->next;
+            if (ptr->data.client_address.sin_addr.s_addr == client_address.sin_addr.s_addr && ptr->data.client_address.sin_port == client_address.sin_port)
+            {
+                ptr->data.ttl = 20;
+                break;
+            }
+        }
+        int n = sendto(socket_file_descriptor, buf, strlen(buf), 0, (struct sockaddr *)&client_address, client_address_length);
+        if (n == -1)
+        {
+            perror("sendto error");
+        }
+        return 1;
+    }
+    return 0;
+}
+
+int eof_filter(char *buf, msgNode *msgHead, addrNode *addrHead, int socket_file_descriptor, struct sockaddr_in client_address)
+{
+    socklen_t client_address_length = sizeof(client_address);
+    // EOF End Server Function
+    if (strcmp(buf, "EOF\n") == 0)
+    {
+        printf("WARNING: EOF message received, ready to stop server\n");
+        msgNode *msgptr = msgHead;
+        addrNode *addrptr = addrHead;
+
+        while (msgHead->next != NULL)
+        {
+            msgptr = msgptr->next;
+            free(msgHead->data.msg);
+            free(msgHead);
+            msgHead = msgptr;
+        }
+        free(msgHead->data.msg);
+        free(msgHead);
+        char temp[BUFSIZ] = "Server shutdown\n";
+        broadcast(addrHead, temp, socket_file_descriptor, BUFSIZ, client_address);
+        while (addrHead->next != NULL)
+        {
+            addrptr = addrptr->next;
+            free(addrHead);
+            addrHead = addrptr;
+        }
+        free(msgHead->data.msg);
+        free(msgHead);
+        int n = sendto(socket_file_descriptor, temp, strlen(temp), 0, (struct sockaddr *)&client_address, client_address_length);
+        if (n == -1)
+        {
+            perror("sendto error");
+        }
+        close(socket_file_descriptor);
+        return 1;
+    }
+    return 0;
+}
+
+int exit_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address)
+{
+    if (strcmp(buf, "exit\n") == 0)
+    {
+        addrNode *ptr = addrHead;
+        while (ptr->next != NULL)
+        {
+            ptr = ptr->next;
+            if (ptr->data.client_address.sin_addr.s_addr == client_address.sin_addr.s_addr && ptr->data.client_address.sin_port == client_address.sin_port)
+            {
+                ptr->data.ttl = -100;
+                break;
+            }
+        }
+        return 1;
+    }
+    return 0;
 }

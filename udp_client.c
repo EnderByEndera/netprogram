@@ -15,17 +15,32 @@
 #include <sys/wait.h>
 #include <pthread.h>
 
+typedef struct addrnode
+{
+    struct
+    {
+        int number;
+        struct sockaddr_in client_address;
+        char name[32];
+        int ttl;
+    } data;
+    struct addrnode *next;
+} addrNode;
+
 struct RA
 {
     int *beep;
     int socket_file_descriptor;
     struct sockaddr_in server_address;
+    addrNode *head;
 };
 
 void wait_child(int signal);
 void *heart_check(void *arg);
 void *listen_thread(void *arg);
 void *heart_send(void *arg);
+void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address);
+int address_filter(char *buf, struct RA *tmpRA);
 
 int main(int argv, char **argc)
 {
@@ -34,6 +49,9 @@ int main(int argv, char **argc)
     char buf[BUFSIZ];
     int server_address_length, pid;
     char loginName[BUFSIZ];
+    addrNode *head = (addrNode *)malloc(sizeof(addrNode));
+    head->next = NULL;
+    head->data.number = 0;
 
     if (argv != 3)
     {
@@ -56,6 +74,7 @@ int main(int argv, char **argc)
     pthread_arg->beep = beep;
     pthread_arg->server_address = server_address;
     pthread_arg->socket_file_descriptor = socket_file_descriptor;
+    pthread_arg->head = head;
 
     while (1)
     {
@@ -148,11 +167,11 @@ int main(int argv, char **argc)
         strcat(temp, " ");
         strcat(temp, buf);
         strcpy(buf, temp);
-        n = sendto(socket_file_descriptor, buf, strlen(buf), 0, (struct sockaddr *)&server_address, sizeof(server_address));
+        broadcast(head, buf, socket_file_descriptor, BUFSIZ, server_address);
+
         if (n == -1)
         {
             perror("sendto error");
-            exit(0);
         }
     }
     *beep = -1;
@@ -202,6 +221,12 @@ void *listen_thread(void *arg)
         }
         buf[n] = '\0';
 
+        int result = address_filter(buf, tmpRA);
+        if (result == 1)
+        {
+            continue;
+        }
+
         if (strcmp(buf, "This is the Heart Beep") == 0)
         {
             *(tmpRA->beep) = 0;
@@ -209,6 +234,7 @@ void *listen_thread(void *arg)
         }
 
         printf("%s", buf);
+
         if (strcmp(buf, "Server shutdown\n") == 0)
         {
             break;
@@ -231,8 +257,71 @@ void *heart_send(void *arg)
         {
             perror("heart beat sendto error");
         }
-        sleep(15);
+        sleep(10);
     }
 
     return 0;
+}
+
+int address_filter(char *buf, struct RA *tmpRA)
+{
+    if (buf[0] == '^' && buf[1] == ':')
+    {
+        int i;
+        for (i = 12; buf[i] != ',' && i < 28; i++)
+            ;
+        char address[i - 12 + 1];
+        char port[5];
+        for (i = 12; buf[i] != ',' && i < 28; i++)
+        {
+            address[i - 12] = buf[i];
+        }
+        address[i - 12] = '\0';
+        addrNode *new = (addrNode *)malloc(sizeof(addrNode));
+        new->next = NULL;
+        int init;
+        i += 8;
+        for (init = i; buf[i] != '\n' && i - init < 5; i++)
+        {
+            port[i - init] = buf[i];
+        }
+        port[i - init] = '\0';
+
+        int err = inet_pton(AF_INET, address, &new->data.client_address.sin_addr);
+        if (err == 0)
+        {
+            perror("Convert IP address failed");
+        }
+        new->data.client_address.sin_port = htons(atoi(port));
+        new->data.client_address.sin_family = AF_INET;
+
+        addrNode *ptr = tmpRA->head;
+        while (ptr->next != NULL)
+        {
+            ptr = ptr->next;
+            if (ptr->data.client_address.sin_addr.s_addr == new->data.client_address.sin_addr.s_addr && ptr->data.client_address.sin_port == new->data.client_address.sin_port)
+            {
+                return 1;
+            }
+        }
+
+        new->data.number = ptr->data.number + 1;
+        ptr->next = new;
+        return 1;
+    }
+    return 0;
+}
+
+void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address)
+{
+    addrNode *ptr = head;
+    while (ptr->next != NULL)
+    {
+        ptr = ptr->next;
+        int numbytes = sendto(fd, msg, msgSize, 0, (struct sockaddr *)&ptr->data.client_address, sizeof(ptr->data.client_address));
+        if (numbytes == -1)
+        {
+            perror("sendto error");
+        }
+    }
 }
