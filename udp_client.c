@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 typedef struct addrnode
 {
@@ -48,7 +49,7 @@ int main(int argv, char **argc)
     int socket_file_descriptor, n;
     char buf[BUFSIZ];
     int server_address_length, pid;
-    char loginName[BUFSIZ];
+    char loginName[32];
     addrNode *head = (addrNode *)malloc(sizeof(addrNode));
     head->next = NULL;
     head->data.number = 0;
@@ -69,6 +70,10 @@ int main(int argv, char **argc)
     server_address.sin_port = htons(atoi(argc[2]));
     server_address_length = sizeof(server_address);
 
+    struct timeval tv;
+    uint64_t sec;
+    uint64_t min;
+
     pthread_t heart_check_thid, listen_thid, heart_send_thid;
     struct RA *pthread_arg = (struct RA *)malloc(sizeof(struct RA));
     pthread_arg->beep = beep;
@@ -84,6 +89,10 @@ int main(int argv, char **argc)
         {
             printf("Name cannot be empty.\n");
         }
+        else if (strlen(loginName) > 16)
+        {
+            printf("Length of the name needs to be less than 16,\n");
+        }
         else
             break;
     }
@@ -93,7 +102,16 @@ int main(int argv, char **argc)
     char temp[BUFSIZ] = {0};
     strcat(temp, loginName);
     temp[strlen(loginName) - 1] = ':';
-    strcat(temp, " went online\n");
+    strcat(temp, " went online    ");
+
+    gettimeofday(&tv, NULL);
+    sec = tv.tv_sec;
+    min = tv.tv_sec / 60;
+    struct tm cur_tm;
+    localtime_r((time_t *)&sec, &cur_tm);
+    snprintf(buf, BUFSIZ, "%d-%02d-%02d %02d:%02d:%02d\n", cur_tm.tm_year + 1900, cur_tm.tm_mon + 1, cur_tm.tm_mday, cur_tm.tm_hour, cur_tm.tm_min, cur_tm.tm_sec);
+
+    strcat(temp, buf);
     n = sendto(socket_file_descriptor, temp, strlen(temp), 0, (struct sockaddr *)&server_address, sizeof(server_address));
 
     int err = pthread_create(&heart_check_thid, NULL, heart_check, (void *)pthread_arg);
@@ -166,8 +184,20 @@ int main(int argv, char **argc)
         strcat(temp, loginName);
         strcat(temp, " ");
         strcat(temp, buf);
+        temp[strlen(temp) - 1] = ' ';
+
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        uint64_t sec = tv.tv_sec;
+        uint64_t min = tv.tv_sec / 60;
+        struct tm cur_tm;
+        localtime_r((time_t *)&sec, &cur_tm);
+        snprintf(buf, BUFSIZ, "   %d-%02d-%02d %02d:%02d:%02d\n", cur_tm.tm_year + 1900, cur_tm.tm_mon + 1, cur_tm.tm_mday, cur_tm.tm_hour, cur_tm.tm_min, cur_tm.tm_sec);
+
+        strcat(temp, buf);
         strcpy(buf, temp);
         broadcast(head, buf, socket_file_descriptor, BUFSIZ, server_address);
+        n = sendto(socket_file_descriptor, buf, strlen(buf), 0, (struct sockaddr *)&server_address, server_address_length);
 
         if (n == -1)
         {
@@ -183,25 +213,28 @@ void *heart_check(void *arg)
 {
     struct RA *tmpRA = (struct RA *)arg;
     int *beep = tmpRA->beep;
+    int time = 2;
 
     while (1)
     {
         if (*beep == -1)
         {
-            return beep;
+            printf("Error: Server disconnected. Exiting...\n");
+            exit(0);
         }
         (*beep)++;
         if (*beep == 16)
         {
             printf("WARNING: Server disconnected. Reconnecting...\n");
+            time = 1;
         }
-        else if (*beep > 35)
+        else if (*beep >= 35)
         {
-            printf("Error: Server disconnected. Waiting...\n");
+            printf("WARNING: Reconnection failed. Waiting 30 seconds for server to respond...\n");
             *beep = -1;
-            sleep(29);
+            sleep(30 - time);
         }
-        sleep(1);
+        sleep(time);
     }
 }
 
@@ -213,10 +246,10 @@ void *listen_thread(void *arg)
 
     while (1)
     {
-        int n = recvfrom(tmpRA->socket_file_descriptor, buf, BUFSIZ, 0, (struct sockaddr *)&(tmpRA->server_address), &server_address_length);
+        int n = recv(tmpRA->socket_file_descriptor, buf, BUFSIZ, 0);
         if (n == -1)
         {
-            perror("recvfrom error");
+            perror("recv error");
             exit(0);
         }
         buf[n] = '\0';
@@ -249,15 +282,21 @@ void *heart_send(void *arg)
 {
     struct RA *tmpRA = (struct RA *)arg;
     char buf[BUFSIZ];
+    int time = 15;
+
     while (1)
     {
         strcpy(buf, "This is the Heart Beep");
         int n = sendto(tmpRA->socket_file_descriptor, buf, strlen(buf), 0, (struct sockaddr *)&(tmpRA->server_address), sizeof(tmpRA->server_address));
+        // printf("INFO: Sent Heart Beep Pack.\n");
         if (n == -1)
         {
             perror("heart beat sendto error");
+            exit(0);
         }
-        sleep(10);
+        if (*(tmpRA->beep) > 8) time = 6;
+        if (*(tmpRA->beep) == -1) time = 3;
+        sleep(time);
     }
 
     return 0;
@@ -265,7 +304,7 @@ void *heart_send(void *arg)
 
 int address_filter(char *buf, struct RA *tmpRA)
 {
-    if (buf[0] == '^' && buf[1] == ':')
+    if (buf[0] == '^' && buf[1] == '.')
     {
         int i;
         for (i = 12; buf[i] != ',' && i < 28; i++)

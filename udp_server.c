@@ -255,8 +255,9 @@ int self_organize(int argv, char **argc)
 
         int result = heart_beep_filter(buf, addrHead, client_address, socket_file_descriptor);
         if (result == 1)
+        {
             continue;
-
+        }
         result = eof_filter(buf, msgHead, addrHead, socket_file_descriptor, client_address);
         if (result == 1)
             break;
@@ -268,6 +269,7 @@ int self_organize(int argv, char **argc)
         printf("INFO: Receive Messge: %s", buf);
 
         i = addAddrNode(addrHead, client_address, buf);
+        addMsgNode(msgHead, buf, strlen(buf));
         if (i == 0)
         {
             printf("INFO: New IP address added, IP: %s, PORT: %d\n", inet_ntop(AF_INET, &client_address.sin_addr, str, sizeof(str)), ntohs(client_address.sin_port));
@@ -275,9 +277,31 @@ int self_organize(int argv, char **argc)
             while (addrptr->next != NULL)
             {
                 addrptr = addrptr->next;
-                inet_ntop(AF_INET, &(addrptr->data.client_address.sin_addr), str, strlen(str));
-                snprintf(buf, BUFSIZ, "^: address: %s, port: %d\n", str, ntohs(addrptr->data.client_address.sin_port));
+                inet_ntop(AF_INET, &addrptr->data.client_address.sin_addr, str, strlen(str));
+                snprintf(buf, BUFSIZ, "^. address: %s, port: %d\n", str, ntohs(addrptr->data.client_address.sin_port));
                 broadcast(addrHead, buf, socket_file_descriptor, strlen(buf), client_address);
+            }
+            char temp[BUFSIZ] = "Connected to Server\n--------------Recent Message--------------\n";
+            n = sendto(socket_file_descriptor, temp, strlen(temp), 0, (struct sockaddr *)&client_address, client_address_length);
+            if (n == -1)
+            {
+                perror("sendto error");
+            }
+            msgNode *ptr = msgHead;
+            while (ptr->next != NULL)
+            {
+                ptr = ptr->next;
+                n = sendto(socket_file_descriptor, ptr->data.msg, ptr->data.size, 0, (struct sockaddr *)&client_address, sizeof(client_address));
+                if (n == -1)
+                {
+                    perror("sendto error");
+                }
+            }
+            strcpy(temp, "------------------------------------------\n");
+            n = sendto(socket_file_descriptor, temp, strlen(temp), 0, (struct sockaddr *)&client_address, client_address_length);
+            if (n == -1)
+            {
+                perror("sendto error");
             }
         }
     }
@@ -368,7 +392,7 @@ void deleteAddrNode(addrNode *addrHead, msgNode *msgHead, int fd)
         }
         else
         {
-            printf("ERROR: Client address %s at PORT %d is not responded, judged as offline.\n", str, ntohs(ptr2->data.client_address.sin_port));
+            printf("WARNING: Client address %s at PORT %d is not responded, judged as offline.\n", str, ntohs(ptr2->data.client_address.sin_port));
 
             char buf[BUFSIZ];
             snprintf(buf, BUFSIZ, "%s: went offline.\n", ptr2->data.name);
@@ -410,9 +434,9 @@ void *heart_check(void *arg)
     }
 }
 
+// Heart Beat Check Function
 int heart_beep_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address, int socket_file_descriptor)
 {
-    // Heart Beat Check Function
     socklen_t client_address_length = sizeof(client_address);
     if (strcmp(buf, "This is the Heart Beep") == 0)
     {
