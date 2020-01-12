@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 typedef struct msgnode
 {
@@ -44,9 +45,9 @@ struct RA
     char *buf;
 };
 
-void addMsgNode(msgNode *head, char *msg, size_t size);
-int addAddrNode(addrNode *head, struct sockaddr_in client_address, char *buf);
-void deleteAddrNode(addrNode *head, msgNode *msgHead, int fd);
+void add_msg_node(msgNode *head, char *msg, size_t size);
+int add_addr_node(addrNode *head, struct sockaddr_in client_address, char *buf);
+void delete_addr_node(addrNode *head, msgNode *msgHead, int fd);
 void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address);
 void *heart_check(void *arg);
 int client_server_structure(int argv, char **argc);
@@ -56,6 +57,10 @@ int eof_filter(char *buf, msgNode *msgHead, addrNode *addrHead, int socket_file_
 int exit_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address);
 
 // Building a Chat Room Server based on UDP connection
+// This is the main entrance function for starting the UDP server
+// When started, you have to choose to start with C/S structure or Self-Organizing Structure
+// All the information is marked with INFO, warning with WARNING, error with ERROR
+// Usage: ./udp_server port, the IP address is set with INADDR_ANY
 int main(int argv, char **argc)
 {
     if (argv != 2)
@@ -83,18 +88,24 @@ int main(int argv, char **argc)
     }
 }
 
+// This is the C/S structure entrance function.
+// This aims to make C/S structure come true
+// When starting the C/S structure, server will store all the message sent after server started
+// It will also store all the UDP clients' addresses and ports
 int client_server_structure(int argv, char **argc)
 {
     printf("INFO: Start C/S structure mode\n");
-    int size = 220 * 1024; // used for setsocketopt() func to set buffer size
+
+    // used for setsocketopt() func to set buffer size
+    int size = 220 * 1024;
+
     struct sockaddr_in server_address, client_address;
-    int socket_file_descriptor; // used for UDP connection
+    int socket_file_descriptor;
     socklen_t client_address_length;
-    int sockfd;
     char buf[BUFSIZ];
     char str[INET_ADDRSTRLEN];
     int i, n;
-    pthread_t thid_heart_check, thid_heart_listen;
+    pthread_t thid_heart_check;
 
     msgNode *msgHead = (msgNode *)malloc(sizeof(msgNode));
     addrNode *addrHead = (addrNode *)malloc(sizeof(addrNode));
@@ -102,6 +113,7 @@ int client_server_structure(int argv, char **argc)
     msgHead->next = NULL;
     addrHead->next = NULL;
     msgHead->data.number = 0;
+    msgHead->data.msg = (char *)malloc(sizeof(char));
     addrHead->data.number = 0;
 
     while ((socket_file_descriptor = socket(PF_INET, SOCK_DGRAM, 0)) == -1)
@@ -117,6 +129,7 @@ int client_server_structure(int argv, char **argc)
 
     printf("INFO: Bind success, accepting UDP connections...\n");
 
+    // Created one thread for Heart Beat Check function, which is heart_check()
     struct RA *thread_attr = (struct RA *)malloc(sizeof(struct RA));
     thread_attr->addrHead = addrHead;
     thread_attr->msgHead = msgHead;
@@ -145,21 +158,25 @@ int client_server_structure(int argv, char **argc)
         }
         buf[n] = '\0';
 
+        // All the messages will first pass these three filters.
+        // heart_beep_filter is used for checking message is Heart Beat Pack or not
         int result = heart_beep_filter(buf, addrHead, client_address, socket_file_descriptor);
         if (result == 1)
             continue;
 
+        // eof_filter is used for checking whether the message is EOF signal sent by UDP client
         result = eof_filter(buf, msgHead, addrHead, socket_file_descriptor, client_address);
         if (result == 1)
             break;
 
+        // exit_filter is used for checking whether the message sent by client is client disconnected message
         result = exit_filter(buf, addrHead, client_address);
         if (result == 1)
             continue;
 
         printf("INFO: Received from IP: %s, PORT: %d\n", inet_ntop(AF_INET, &client_address.sin_addr, str, sizeof(str)), ntohs(client_address.sin_port));
         printf("INFO: Receive Message: %s", buf);
-        i = addAddrNode(addrHead, client_address, buf);
+        i = add_addr_node(addrHead, client_address, buf);
         if (i == 0)
         {
             printf("INFO: New IP address added, IP: %s, PORT: %d\n", inet_ntop(AF_INET, &client_address.sin_addr, str, sizeof(str)), ntohs(client_address.sin_port));
@@ -186,25 +203,29 @@ int client_server_structure(int argv, char **argc)
                 perror("sendto error");
             }
         }
-        addMsgNode(msgHead, buf, n);
+        add_msg_node(msgHead, buf, n);
         broadcast(addrHead, buf, socket_file_descriptor, n, client_address);
     }
 
     return 0;
 }
 
+// This function is used for starting Self-Organizing Server
+// In Self-Organizing Server, all the clients will send messages without server's transmission
+// Server only needs to send new added client all other clients' IP addresses and ports
+// and all the history messages clients sent.
+// So server in Self-Organizing Mode will also receive all the clients' messages.
 int self_organize(int argv, char **argc)
 {
     printf("INFO: Start Self Organization mode\n");
-    int size = 220 * 1024; // used for setsocketopt() func to set buffer size
+    int size = 220 * 1024;
     struct sockaddr_in server_address, client_address;
-    int socket_file_descriptor; // used for UDP connection
+    int socket_file_descriptor;
     socklen_t client_address_length;
-    int sockfd;
     char buf[BUFSIZ];
     char str[INET_ADDRSTRLEN];
     int i, n;
-    pthread_t thid_heart_check, thid_heart_listen;
+    pthread_t thid_heart_check;
 
     msgNode *msgHead = (msgNode *)malloc(sizeof(msgNode));
     addrNode *addrHead = (addrNode *)malloc(sizeof(addrNode));
@@ -268,8 +289,8 @@ int self_organize(int argv, char **argc)
 
         printf("INFO: Receive Messge: %s", buf);
 
-        i = addAddrNode(addrHead, client_address, buf);
-        addMsgNode(msgHead, buf, strlen(buf));
+        i = add_addr_node(addrHead, client_address, buf);
+        add_msg_node(msgHead, buf, strlen(buf));
         if (i == 0)
         {
             printf("INFO: New IP address added, IP: %s, PORT: %d\n", inet_ntop(AF_INET, &client_address.sin_addr, str, sizeof(str)), ntohs(client_address.sin_port));
@@ -309,7 +330,8 @@ int self_organize(int argv, char **argc)
     return 0;
 }
 
-void addMsgNode(msgNode *head, char *msg, size_t size)
+// This function is used to add one message node when new message is sent to server.
+void add_msg_node(msgNode *head, char *msg, size_t size)
 {
     msgNode *ptr = head;
     while (ptr->next != NULL)
@@ -328,7 +350,9 @@ void addMsgNode(msgNode *head, char *msg, size_t size)
     ptr->next = new;
 }
 
-int addAddrNode(addrNode *head, struct sockaddr_in client_address, char *buf)
+// This function is used to add one address node for storing one client's network address when
+// one new client has joined the Chatroom.
+int add_addr_node(addrNode *head, struct sockaddr_in client_address, char *buf)
 {
     addrNode *ptr = head;
     char name[32] = {0};
@@ -372,7 +396,9 @@ int addAddrNode(addrNode *head, struct sockaddr_in client_address, char *buf)
     return 0;
 }
 
-void deleteAddrNode(addrNode *addrHead, msgNode *msgHead, int fd)
+// This function is used for deleting one address node when the client corresponding to the
+// network address stored in the address node is disconnected.
+void delete_addr_node(addrNode *addrHead, msgNode *msgHead, int fd)
 {
     addrNode *ptr = addrHead;
     addrNode *ptr2 = addrHead->next;
@@ -394,9 +420,16 @@ void deleteAddrNode(addrNode *addrHead, msgNode *msgHead, int fd)
         {
             printf("WARNING: Client address %s at PORT %d is not responded, judged as offline.\n", str, ntohs(ptr2->data.client_address.sin_port));
 
+            struct timeval tv;
+            uint64_t sec;
+            gettimeofday(&tv, NULL);
+            sec = tv.tv_sec;
+            struct tm cur_tm;
+            localtime_r((time_t *)&sec, &cur_tm);
+
             char buf[BUFSIZ];
-            snprintf(buf, BUFSIZ, "%s: went offline.\n", ptr2->data.name);
-            addMsgNode(msgHead, buf, strlen(buf));
+            snprintf(buf, BUFSIZ, "%s: went offline   %d-%02d-%02d %02d:%02d:%02d\n", ptr2->data.name, cur_tm.tm_year + 1900, cur_tm.tm_mon + 1, cur_tm.tm_mday, cur_tm.tm_hour, cur_tm.tm_min, cur_tm.tm_sec);
+            add_msg_node(msgHead, buf, strlen(buf));
             broadcast(addrHead, buf, fd, BUFSIZ, ptr2->data.client_address);
             ptr->next = ptr2->next;
             free(ptr2);
@@ -408,6 +441,7 @@ void deleteAddrNode(addrNode *addrHead, msgNode *msgHead, int fd)
     }
 }
 
+// This function is used for broadcasting one message to all the other clients after one client sent one message
 void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address)
 {
     addrNode *ptr = head;
@@ -422,6 +456,7 @@ void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockadd
     }
 }
 
+// This function is used for heart beap pack checking when one client built the connection with server
 void *heart_check(void *arg)
 {
     printf("INFO: Heart Check Thread opened, start to check heart beat of every address\n");
@@ -429,12 +464,11 @@ void *heart_check(void *arg)
 
     while (1)
     {
-        deleteAddrNode(tmpRA->addrHead, tmpRA->msgHead, tmpRA->fd);
+        delete_addr_node(tmpRA->addrHead, tmpRA->msgHead, tmpRA->fd);
         sleep(1);
     }
 }
 
-// Heart Beat Check Function
 int heart_beep_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address, int socket_file_descriptor)
 {
     socklen_t client_address_length = sizeof(client_address);
@@ -487,8 +521,7 @@ int eof_filter(char *buf, msgNode *msgHead, addrNode *addrHead, int socket_file_
             free(addrHead);
             addrHead = addrptr;
         }
-        free(msgHead->data.msg);
-        free(msgHead);
+        free(addrHead);
         int n = sendto(socket_file_descriptor, temp, strlen(temp), 0, (struct sockaddr *)&client_address, client_address_length);
         if (n == -1)
         {

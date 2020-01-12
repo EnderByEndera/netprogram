@@ -48,7 +48,7 @@ int main(int argv, char **argc)
     struct sockaddr_in server_address;
     int socket_file_descriptor, n;
     char buf[BUFSIZ];
-    int server_address_length, pid;
+    int server_address_length;
     char loginName[32];
     addrNode *head = (addrNode *)malloc(sizeof(addrNode));
     head->next = NULL;
@@ -72,7 +72,6 @@ int main(int argv, char **argc)
 
     struct timeval tv;
     uint64_t sec;
-    uint64_t min;
 
     pthread_t heart_check_thid, listen_thid, heart_send_thid;
     struct RA *pthread_arg = (struct RA *)malloc(sizeof(struct RA));
@@ -106,7 +105,6 @@ int main(int argv, char **argc)
 
     gettimeofday(&tv, NULL);
     sec = tv.tv_sec;
-    min = tv.tv_sec / 60;
     struct tm cur_tm;
     localtime_r((time_t *)&sec, &cur_tm);
     snprintf(buf, BUFSIZ, "%d-%02d-%02d %02d:%02d:%02d\n", cur_tm.tm_year + 1900, cur_tm.tm_mon + 1, cur_tm.tm_mday, cur_tm.tm_hour, cur_tm.tm_min, cur_tm.tm_sec);
@@ -189,7 +187,6 @@ int main(int argv, char **argc)
         struct timeval tv;
         gettimeofday(&tv, NULL);
         uint64_t sec = tv.tv_sec;
-        uint64_t min = tv.tv_sec / 60;
         struct tm cur_tm;
         localtime_r((time_t *)&sec, &cur_tm);
         snprintf(buf, BUFSIZ, "   %d-%02d-%02d %02d:%02d:%02d\n", cur_tm.tm_year + 1900, cur_tm.tm_mon + 1, cur_tm.tm_mday, cur_tm.tm_hour, cur_tm.tm_min, cur_tm.tm_sec);
@@ -242,7 +239,6 @@ void *listen_thread(void *arg)
 {
     struct RA *tmpRA = (struct RA *)arg;
     char buf[BUFSIZ];
-    socklen_t server_address_length = sizeof(tmpRA->server_address);
 
     while (1)
     {
@@ -252,7 +248,10 @@ void *listen_thread(void *arg)
             perror("recv error");
             exit(0);
         }
-        buf[n] = '\0';
+        if (n >= BUFSIZ)
+            buf[BUFSIZ - 1] = '\0';
+        else 
+            buf[n] = '\0';
 
         int result = address_filter(buf, tmpRA);
         if (result == 1)
@@ -294,8 +293,10 @@ void *heart_send(void *arg)
             perror("heart beat sendto error");
             exit(0);
         }
-        if (*(tmpRA->beep) > 8) time = 6;
-        if (*(tmpRA->beep) == -1) time = 3;
+        if (*(tmpRA->beep) > 8)
+            time = 6;
+        if (*(tmpRA->beep) == -1)
+            time = 3;
         sleep(time);
     }
 

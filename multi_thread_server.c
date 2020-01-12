@@ -28,7 +28,7 @@ void *thread_func(void *arg)
     {
         memset(buf,0,sizeof(buf));
         read(tmpRA->connfd,buf,sizeof(buf));
-        printf("client ipaddress is %s\n",inet_ntop(AF_INET,&(tmpRA->cli_addr.sin_addr),NULL,0));
+        printf("thread_id is %ld, client ipaddress is %s\n", pthread_self(), inet_ntop(AF_INET,&(tmpRA->cli_addr.sin_addr),NULL,0));
         printf("client send is %s\n",buf);
         write(tmpRA->connfd,buf,sizeof(buf));
     }

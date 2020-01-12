@@ -8,7 +8,8 @@
 
 #define SERVER_PORT 8000
 
-int main() {
+int main()
+{
     printf("Started\n");
     int i, j, n, maxi;
 
@@ -28,7 +29,8 @@ int main() {
     server_address.sin_port = htons(SERVER_PORT);
     printf("Server address initialized\n");
 
-    if (bind(listenfd, (struct sockaddr*) &server_address, sizeof(server_address)) == -1) {
+    if (bind(listenfd, (struct sockaddr *)&server_address, sizeof(server_address)) == -1)
+    {
         printf("Bind failed\n");
         exit(1);
     }
@@ -39,73 +41,91 @@ int main() {
     maxfd = listenfd; // 起初listenfd即为最大文件描述符
 
     maxi = -1; // 将来用作client[]的下标，初始值指向n个元素之前下标位置
-    for (i = 0; i < FD_SETSIZE; i++) {
+    for (i = 0; i < FD_SETSIZE; i++)
+    {
         client[i] = -1;
     }
     FD_ZERO(&all_set);
     FD_SET(listenfd, &all_set);
     printf("Initialization finished\n");
 
-    while (1) {
+    while (1)
+    {
         read_set = all_set;
         nready = select(maxfd + 1, &read_set, NULL, NULL, NULL);
         printf("Select finished\n");
-        if (nready < 0) {
+        if (nready < 0)
+        {
             perror("select error");
             exit(0);
         }
-        if (FD_ISSET(listenfd, &read_set)) {
+        if (FD_ISSET(listenfd, &read_set))
+        {
             client_address_length = sizeof(client_address);
-            connfd = accept(listenfd, (struct sockaddr *) &client_address, &client_address_length);
+            connfd = accept(listenfd, (struct sockaddr *)&client_address, &client_address_length);
             printf("Received from IP: %s, Port: %d \n", inet_ntop(AF_INET, &client_address.sin_addr, str, sizeof(str)), ntohs(client_address.sin_port));
-            for (i = 0; i < FD_SETSIZE; i++) {
-                if (client[i] < 0) {
+            for (i = 0; i < FD_SETSIZE; i++)
+            {
+                if (client[i] < 0)
+                {
                     client[i] = connfd;
                     break;
                 }
             }
             printf("Added to the bitmap\n");
-            if (i == FD_SETSIZE) {
+            if (i == FD_SETSIZE)
+            {
                 perror("Reached limitation of the connection number\n");
                 exit(1);
             }
-            
+
             FD_SET(connfd, &all_set);
-            
-            if (connfd > maxfd) {
+
+            if (connfd > maxfd)
+            {
                 maxfd = connfd;
             }
 
-            if (i > maxi) {
+            if (i > maxi)
+            {
                 maxi = i;
             } // Ensuring that the maxi is the largest number of fd;
 
-            if (--nready == 0) {
+            if (--nready == 0)
+            {
                 continue;
             }
         }
 
-        for (i = 0; i < maxfd; i++) {
-            if ((sockfd = client[i]) < 0) {
+        for (i = 0; i < maxfd; i++)
+        {
+            if ((sockfd = client[i]) < 0)
+            {
                 continue;
             }
             printf("Find the right sockfd\n");
-            if (FD_ISSET(sockfd, &read_set)) {
+            if (FD_ISSET(sockfd, &read_set))
+            {
                 printf("Start to read from client\n");
                 n = read(sockfd, buf, sizeof(buf));
-                if (n == 0) {
+                if (n == 0)
+                {
                     printf("Client start to end the communication\n"); // EOF
                     close(sockfd);
                     FD_CLR(sockfd, &read_set);
                     client[i] = -1;
-                } else if (n > 0) { // Something is written by client
-                    for (j = 0; j < n; j++) {
+                }
+                else if (n > 0)
+                { // Something is written by client
+                    for (j = 0; j < n; j++)
+                    {
                         buf[j] = toupper(buf[j]);
                     }
                     // sleep(5);
                     write(sockfd, buf, sizeof(buf));
                 }
-                if (--nready == 0) {
+                if (--nready == 0)
+                {
                     break;
                 }
             }
