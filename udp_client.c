@@ -16,7 +16,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 
-typedef struct addrnode
+typedef struct idnode
 {
     struct
     {
@@ -25,22 +25,22 @@ typedef struct addrnode
         char name[32];
         int ttl;
     } data;
-    struct addrnode *next;
-} addrNode;
+    struct idnode *next;
+} idnode;
 
 struct RA
 {
     int *beep;
     int socket_file_descriptor;
     struct sockaddr_in server_address;
-    addrNode *head;
+    idnode *head;
 };
 
 void wait_child(int signal);
 void *heart_check(void *arg);
 void *listen_thread(void *arg);
 void *heart_send(void *arg);
-void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address);
+void broadcast(idnode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address);
 int address_filter(char *buf, struct RA *tmpRA);
 
 int main(int argv, char **argc)
@@ -50,7 +50,7 @@ int main(int argv, char **argc)
     char buf[BUFSIZ];
     int server_address_length;
     char loginName[32];
-    addrNode *head = (addrNode *)malloc(sizeof(addrNode));
+    idnode *head = (idnode *)malloc(sizeof(idnode));
     head->next = NULL;
     head->data.number = 0;
 
@@ -317,7 +317,7 @@ int address_filter(char *buf, struct RA *tmpRA)
             address[i - 12] = buf[i];
         }
         address[i - 12] = '\0';
-        addrNode *new = (addrNode *)malloc(sizeof(addrNode));
+        idnode *new = (idnode *)malloc(sizeof(idnode));
         new->next = NULL;
         int init;
         i += 8;
@@ -335,7 +335,7 @@ int address_filter(char *buf, struct RA *tmpRA)
         new->data.client_address.sin_port = htons(atoi(port));
         new->data.client_address.sin_family = AF_INET;
 
-        addrNode *ptr = tmpRA->head;
+        idnode *ptr = tmpRA->head;
         while (ptr->next != NULL)
         {
             ptr = ptr->next;
@@ -352,9 +352,9 @@ int address_filter(char *buf, struct RA *tmpRA)
     return 0;
 }
 
-void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address)
+void broadcast(idnode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address)
 {
-    addrNode *ptr = head;
+    idnode *ptr = head;
     while (ptr->next != NULL)
     {
         ptr = ptr->next;

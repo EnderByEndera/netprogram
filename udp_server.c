@@ -25,7 +25,7 @@ typedef struct msgnode
     struct msgnode *next;
 } msgNode; // data structor for storing data from two clients
 
-typedef struct addrnode
+typedef struct idnode
 {
     struct
     {
@@ -34,27 +34,27 @@ typedef struct addrnode
         char name[32];
         int ttl;
     } data;
-    struct addrnode *next;
-} addrNode;
+    struct idnode *next;
+} idnode;
 
 struct RA
 {
-    addrNode *addrHead;
+    idnode *addrHead;
     msgNode *msgHead;
     int fd;
     char *buf;
 };
 
 void add_msg_node(msgNode *head, char *msg, size_t size);
-int add_addr_node(addrNode *head, struct sockaddr_in client_address, char *buf);
-void delete_addr_node(addrNode *head, msgNode *msgHead, int fd);
-void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address);
+int add_addr_node(idnode *head, struct sockaddr_in client_address, char *buf);
+void delete_addr_node(idnode *head, msgNode *msgHead, int fd);
+void broadcast(idnode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address);
 void *heart_check(void *arg);
 int client_server_structure(int argv, char **argc);
 int self_organize(int argv, char **argc);
-int heart_beep_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address, int socket_file_descriptor);
-int eof_filter(char *buf, msgNode *msgHead, addrNode *addrHead, int socket_file_descriptor, struct sockaddr_in client_address);
-int exit_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address);
+int heart_beep_filter(char *buf, idnode *addrHead, struct sockaddr_in client_address, int socket_file_descriptor);
+int eof_filter(char *buf, msgNode *msgHead, idnode *addrHead, int socket_file_descriptor, struct sockaddr_in client_address);
+int exit_filter(char *buf, idnode *addrHead, struct sockaddr_in client_address);
 
 // Building a Chat Room Server based on UDP connection
 // This is the main entrance function for starting the UDP server
@@ -108,7 +108,7 @@ int client_server_structure(int argv, char **argc)
     pthread_t thid_heart_check;
 
     msgNode *msgHead = (msgNode *)malloc(sizeof(msgNode));
-    addrNode *addrHead = (addrNode *)malloc(sizeof(addrNode));
+    idnode *addrHead = (idnode *)malloc(sizeof(idnode));
 
     msgHead->next = NULL;
     addrHead->next = NULL;
@@ -228,7 +228,7 @@ int self_organize(int argv, char **argc)
     pthread_t thid_heart_check;
 
     msgNode *msgHead = (msgNode *)malloc(sizeof(msgNode));
-    addrNode *addrHead = (addrNode *)malloc(sizeof(addrNode));
+    idnode *addrHead = (idnode *)malloc(sizeof(idnode));
 
     msgHead->next = NULL;
     addrHead->next = NULL;
@@ -294,7 +294,7 @@ int self_organize(int argv, char **argc)
         if (i == 0)
         {
             printf("INFO: New IP address added, IP: %s, PORT: %d\n", inet_ntop(AF_INET, &client_address.sin_addr, str, sizeof(str)), ntohs(client_address.sin_port));
-            addrNode *addrptr = addrHead;
+            idnode *addrptr = addrHead;
             while (addrptr->next != NULL)
             {
                 addrptr = addrptr->next;
@@ -352,9 +352,9 @@ void add_msg_node(msgNode *head, char *msg, size_t size)
 
 // This function is used to add one address node for storing one client's network address when
 // one new client has joined the Chatroom.
-int add_addr_node(addrNode *head, struct sockaddr_in client_address, char *buf)
+int add_addr_node(idnode *head, struct sockaddr_in client_address, char *buf)
 {
-    addrNode *ptr = head;
+    idnode *ptr = head;
     char name[32] = {0};
     int i;
 
@@ -380,7 +380,7 @@ int add_addr_node(addrNode *head, struct sockaddr_in client_address, char *buf)
             }
         }
     }
-    addrNode *new = (addrNode *)malloc(sizeof(addrNode));
+    idnode *new = (idnode *)malloc(sizeof(idnode));
 
     new->next = NULL;
     new->data.client_address = client_address;
@@ -398,10 +398,10 @@ int add_addr_node(addrNode *head, struct sockaddr_in client_address, char *buf)
 
 // This function is used for deleting one address node when the client corresponding to the
 // network address stored in the address node is disconnected.
-void delete_addr_node(addrNode *addrHead, msgNode *msgHead, int fd)
+void delete_addr_node(idnode *addrHead, msgNode *msgHead, int fd)
 {
-    addrNode *ptr = addrHead;
-    addrNode *ptr2 = addrHead->next;
+    idnode *ptr = addrHead;
+    idnode *ptr2 = addrHead->next;
     char str[INET_ADDRSTRLEN];
 
     while (ptr->next != NULL)
@@ -442,9 +442,9 @@ void delete_addr_node(addrNode *addrHead, msgNode *msgHead, int fd)
 }
 
 // This function is used for broadcasting one message to all the other clients after one client sent one message
-void broadcast(addrNode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address)
+void broadcast(idnode *head, char *msg, int fd, size_t msgSize, struct sockaddr_in client_address)
 {
-    addrNode *ptr = head;
+    idnode *ptr = head;
     while (ptr->next != NULL)
     {
         ptr = ptr->next;
@@ -469,12 +469,12 @@ void *heart_check(void *arg)
     }
 }
 
-int heart_beep_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address, int socket_file_descriptor)
+int heart_beep_filter(char *buf, idnode *addrHead, struct sockaddr_in client_address, int socket_file_descriptor)
 {
     socklen_t client_address_length = sizeof(client_address);
     if (strcmp(buf, "This is the Heart Beep") == 0)
     {
-        addrNode *ptr = addrHead;
+        idnode *ptr = addrHead;
         while (ptr->next != NULL)
         {
             ptr = ptr->next;
@@ -494,7 +494,7 @@ int heart_beep_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_a
     return 0;
 }
 
-int eof_filter(char *buf, msgNode *msgHead, addrNode *addrHead, int socket_file_descriptor, struct sockaddr_in client_address)
+int eof_filter(char *buf, msgNode *msgHead, idnode *addrHead, int socket_file_descriptor, struct sockaddr_in client_address)
 {
     socklen_t client_address_length = sizeof(client_address);
     // EOF End Server Function
@@ -502,7 +502,7 @@ int eof_filter(char *buf, msgNode *msgHead, addrNode *addrHead, int socket_file_
     {
         printf("WARNING: EOF message received, ready to stop server\n");
         msgNode *msgptr = msgHead;
-        addrNode *addrptr = addrHead;
+        idnode *addrptr = addrHead;
 
         while (msgHead->next != NULL)
         {
@@ -533,11 +533,11 @@ int eof_filter(char *buf, msgNode *msgHead, addrNode *addrHead, int socket_file_
     return 0;
 }
 
-int exit_filter(char *buf, addrNode *addrHead, struct sockaddr_in client_address)
+int exit_filter(char *buf, idnode *addrHead, struct sockaddr_in client_address)
 {
     if (strcmp(buf, "exit\n") == 0)
     {
-        addrNode *ptr = addrHead;
+        idnode *ptr = addrHead;
         while (ptr->next != NULL)
         {
             ptr = ptr->next;
